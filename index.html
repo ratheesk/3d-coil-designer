@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Coil Designer</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+            background: #111;
+            color: #eee;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 100;
+            max-width: 250px;
+        }
+
+        label {
+            display: block;
+            margin-top: 8px;
+        }
+
+        input {
+            width: 80px;
+            padding: 3px;
+        }
+
+        button {
+            margin-top: 10px;
+            padding: 6px 12px;
+            cursor: pointer;
+            background: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background: #357abd;
+        }
+
+        #results {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #666;
+            line-height: 1.6;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 13px;
+            z-index: 100;
+        }
+
+        #controls h4 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+        }
+
+        .control-btn {
+            padding: 8px 12px;
+            margin: 3px;
+            cursor: pointer;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .control-btn:hover {
+            background: #444;
+        }
+
+        .view-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            margin-top: 8px;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        .help-text {
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="ui">
+        <h3 style="margin: 0 0 10px 0;">Coil Parameters</h3>
+        <label>AWG: <input type="number" id="awg" value="20" min="14" max="30"></label>
+        <label>Turns: <input type="number" id="turns" value="180"></label>
+        <label>Outer Width (mm): <input type="number" id="outerW" value="20" step="1"></label>
+        <label>Outer Height (mm): <input type="number" id="outerH" value="16" step="1"></label>
+        <label>Coil Length (mm): <input type="number" id="coilLen" value="20" step="1"></label>
+        <label>Target L (mH): <input type="number" id="targetL" value="1.0" step="0.1"></label>
+        <button id="calcBtn">Auto Calc Turns</button>
+        <div id="results"></div>
+    </div>
+
+    <div id="formulas"
+        style="position: absolute; top: 10px; right: 10px; background: rgba(0, 0, 0, 0.8); padding: 15px; border-radius: 8px; font-size: 12px; z-index: 100; max-width: 300px;">
+        <h3 style="margin: 0 0 10px 0; font-size: 14px;">Formulas Used</h3>
+        <div style="line-height: 1.8;">
+            <strong>Inductance (L):</strong><br>
+            <code style="background: #333; padding: 2px 4px; border-radius: 3px;">L = μ₀ × N² × A / l</code><br>
+            <span style="font-size: 10px; color: #aaa;">
+                where:<br>
+                μ₀ = 4π × 10⁻⁷ H/m<br>
+                N = number of turns<br>
+                A = cross-sectional area (W × H)<br>
+                l = coil length
+            </span>
+            <br><br>
+
+            <strong>Wire Length:</strong><br>
+            <code
+                style="background: #333; padding: 2px 4px; border-radius: 3px;">L_wire = Σ(perimeter × turns_per_layer)</code><br>
+            <span style="font-size: 10px; color: #aaa;">
+                perimeter = 2(W + H) for each layer<br>
+                Accounts for increasing size per layer
+            </span>
+            <br><br>
+
+            <strong>DC Resistance (DCR):</strong><br>
+            <code style="background: #333; padding: 2px 4px; border-radius: 3px;">R = ρ × L_wire / A_wire</code><br>
+            <span style="font-size: 10px; color: #aaa;">
+                where:<br>
+                ρ = 1.724 × 10⁻⁸ Ω·m (copper)<br>
+                L_wire = total wire length<br>
+                A_wire = wire cross-section area
+            </span>
+            <br><br>
+
+            <strong>Layer Calculations:</strong><br>
+            <code
+                style="background: #333; padding: 2px 4px; border-radius: 3px;">turns_per_layer = ⌊l / pitch⌋</code><br>
+            <code
+                style="background: #333; padding: 2px 4px; border-radius: 3px;">layers = ⌈N / turns_per_layer⌉</code><br>
+            <span style="font-size: 10px; color: #aaa;">
+                pitch = wire_diameter × 1.1<br>
+                (includes enamel insulation)
+            </span>
+        </div>
+    </div>
+
+    <div id="controls">
+        <h4>View Controls</h4>
+        <div class="view-buttons">
+            <button class="control-btn" id="viewFront">Front</button>
+            <button class="control-btn" id="viewTop">Top</button>
+            <button class="control-btn" id="viewSide">Side</button>
+            <button class="control-btn" id="viewIso">Isometric</button>
+            <button class="control-btn" id="toggleDims">Dims: ON</button>
+            <button class="control-btn" id="resetView">Reset</button>
+        </div>
+        <div class="help-text">
+            🖱️ Drag to rotate • Scroll to zoom
+        </div>
+    </div>
+
+    <canvas id="three"></canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // OrbitControls implementation
+        class OrbitControls {
+            constructor(camera, domElement) {
+                this.camera = camera;
+                this.domElement = domElement;
+                this.target = new THREE.Vector3();
+
+                this.rotateSpeed = 1.0;
+                this.zoomSpeed = 1.0;
+
+                this.spherical = new THREE.Spherical();
+                this.sphericalDelta = new THREE.Spherical();
+
+                this.scale = 1;
+                this.panOffset = new THREE.Vector3();
+
+                this.rotateStart = new THREE.Vector2();
+                this.rotateEnd = new THREE.Vector2();
+                this.rotateDelta = new THREE.Vector2();
+
+                this.STATE = { NONE: -1, ROTATE: 0, ZOOM: 1, PAN: 2 };
+                this.state = this.STATE.NONE;
+
+                this.domElement.addEventListener('mousedown', this.onMouseDown.bind(this));
+                this.domElement.addEventListener('wheel', this.onMouseWheel.bind(this));
+                this.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+            }
+
+            onMouseDown(event) {
+                event.preventDefault();
+                if (event.button === 0) {
+                    this.state = this.STATE.ROTATE;
+                    this.rotateStart.set(event.clientX, event.clientY);
+                }
+                this.domElement.addEventListener('mousemove', this.onMouseMove.bind(this));
+                this.domElement.addEventListener('mouseup', this.onMouseUp.bind(this));
+            }
+
+            onMouseMove(event) {
+                event.preventDefault();
+                if (this.state === this.STATE.ROTATE) {
+                    this.rotateEnd.set(event.clientX, event.clientY);
+                    this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart).multiplyScalar(this.rotateSpeed);
+
+                    this.sphericalDelta.theta = 2 * Math.PI * this.rotateDelta.x / this.domElement.clientHeight;
+                    this.sphericalDelta.phi = 2 * Math.PI * this.rotateDelta.y / this.domElement.clientHeight;
+
+                    this.rotateStart.copy(this.rotateEnd);
+                }
+            }
+
+            onMouseUp(event) {
+                event.preventDefault();
+                this.domElement.removeEventListener('mousemove', this.onMouseMove.bind(this));
+                this.domElement.removeEventListener('mouseup', this.onMouseUp.bind(this));
+                this.state = this.STATE.NONE;
+            }
+
+            onMouseWheel(event) {
+                event.preventDefault();
+                if (event.deltaY < 0) {
+                    this.scale *= 0.95;
+                } else {
+                    this.scale /= 0.95;
+                }
+            }
+
+            update() {
+                const offset = new THREE.Vector3();
+                offset.copy(this.camera.position).sub(this.target);
+
+                this.spherical.setFromVector3(offset);
+                this.spherical.theta += this.sphericalDelta.theta;
+                this.spherical.phi += this.sphericalDelta.phi;
+                this.spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, this.spherical.phi));
+                this.spherical.radius *= this.scale;
+                this.spherical.radius = Math.max(0.1, Math.min(10, this.spherical.radius));
+
+                offset.setFromSpherical(this.spherical);
+                this.camera.position.copy(this.target).add(offset);
+                this.camera.lookAt(this.target);
+
+                this.sphericalDelta.set(0, 0, 0);
+                this.scale = 1;
+            }
+        }
+
+        const MU0 = 4 * Math.PI * 1e-7;   // Permeability of free space
+        const RHO = 1.724e-8;             // Resistivity of copper (Ω·m)
+
+        const AWG = {
+            14: { dia: 1.628, area: 2.081 },
+            15: { dia: 1.450, area: 1.650 },
+            16: { dia: 1.291, area: 1.309 },
+            17: { dia: 1.150, area: 1.036 },
+            18: { dia: 1.024, area: 0.823 },
+            19: { dia: 0.912, area: 0.653 },
+            20: { dia: 0.812, area: 0.518 },
+            21: { dia: 0.723, area: 0.410 },
+            22: { dia: 0.644, area: 0.326 },
+            23: { dia: 0.573, area: 0.258 },
+            24: { dia: 0.511, area: 0.205 },
+            25: { dia: 0.455, area: 0.162 },
+            26: { dia: 0.405, area: 0.129 },
+            27: { dia: 0.361, area: 0.102 },
+            28: { dia: 0.321, area: 0.081 },
+            29: { dia: 0.286, area: 0.064 },
+            30: { dia: 0.255, area: 0.051 }
+        };
+
+
+        function computeFromOuter(outerW, outerH, coilLen, awg, turns) {
+            const d = AWG[awg].dia * 1.1;
+            const pitch = d;
+            const tpl = Math.floor(coilLen / pitch);
+            const layers = Math.ceil(turns / tpl);
+
+            // Calculate inner dimensions from outer
+            const innerW = outerW - 2 * pitch * layers;
+            const innerH = outerH - 2 * pitch * layers;
+
+            if (innerW <= 0 || innerH <= 0) {
+                return {
+                    innerW: 1,
+                    innerH: 1,
+                    tpl,
+                    layers,
+                    L: 0,
+                    dcr: 0,
+                    wireLen: 0,
+                    pitch,
+                    error: "Too many layers for given outer dimensions!"
+                };
+            }
+
+            const A = (innerW / 1000) * (innerH / 1000);
+            const L = MU0 * turns * turns * A / (coilLen / 1000);
+
+            let wireLen = 0, rem = turns;
+            for (let l = 0; l < layers; l++) {
+                const tThis = Math.min(rem, tpl);
+                const w = innerW + 2 * pitch * (l + 0.5);
+                const h = innerH + 2 * pitch * (l + 0.5);
+                const per = 2 * (w + h);
+                wireLen += (per / 1000) * tThis;
+                rem -= tThis;
+            }
+            const dcr = (RHO * wireLen) / (AWG[awg].area / 1e6);
+            return { innerW, innerH, tpl, layers, L, dcr, wireLen, pitch, error: null };
+        }
+
+        // Three.js scene
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 10);
+        camera.position.set(0.15, 0.1, 0.3);
+
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("three"), antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+
+        const light = new THREE.DirectionalLight(0xffffff, 1.0);
+        light.position.set(1, 2, 2);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+        const coilGroup = new THREE.Group();
+        scene.add(coilGroup);
+
+        const dimensionGroup = new THREE.Group();
+        scene.add(dimensionGroup);
+
+        let showDimensions = true;
+
+        function createTextSprite(text) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 64;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.font = 'Bold 32px Arial';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+            const texture = new THREE.Texture(canvas);
+            texture.needsUpdate = true;
+
+            const material = new THREE.SpriteMaterial({ map: texture });
+            const sprite = new THREE.Sprite(material);
+            sprite.scale.set(0.03, 0.0075, 1);
+
+            return sprite;
+        }
+
+        function createDimensionLine(start, end, offset, label) {
+            const points = [];
+            points.push(new THREE.Vector3(start.x, start.y, start.z));
+            points.push(new THREE.Vector3(end.x, end.y, end.z));
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
+            const line = new THREE.Line(geometry, material);
+
+            const midpoint = new THREE.Vector3(
+                (start.x + end.x) / 2,
+                (start.y + end.y) / 2,
+                (start.z + end.z) / 2
+            );
+            midpoint.add(offset);
+
+            const sprite = createTextSprite(label);
+            sprite.position.copy(midpoint);
+
+            return { line, sprite };
+        }
+
+        function drawDimensions(outerW, outerH, coilLen) {
+            dimensionGroup.clear();
+
+            if (!showDimensions) return;
+
+            const w = outerW / 1000;
+            const h = outerH / 1000;
+            const d = coilLen / 1000;
+
+            // Width dimension
+            const widthDim = createDimensionLine(
+                new THREE.Vector3(-w / 2, -h / 2, d / 2),
+                new THREE.Vector3(w / 2, -h / 2, d / 2),
+                new THREE.Vector3(0, -0.02, 0),
+                `${outerW.toFixed(1)}mm`
+            );
+            dimensionGroup.add(widthDim.line);
+            dimensionGroup.add(widthDim.sprite);
+
+            // Height dimension
+            const heightDim = createDimensionLine(
+                new THREE.Vector3(w / 2, -h / 2, d / 2),
+                new THREE.Vector3(w / 2, h / 2, d / 2),
+                new THREE.Vector3(0.02, 0, 0),
+                `${outerH.toFixed(1)}mm`
+            );
+            dimensionGroup.add(heightDim.line);
+            dimensionGroup.add(heightDim.sprite);
+
+            // Depth dimension
+            const depthDim = createDimensionLine(
+                new THREE.Vector3(w / 2, h / 2, -d / 2),
+                new THREE.Vector3(w / 2, h / 2, d / 2),
+                new THREE.Vector3(0.02, 0, 0),
+                `${coilLen.toFixed(1)}mm`
+            );
+            dimensionGroup.add(depthDim.line);
+            dimensionGroup.add(depthDim.sprite);
+        }
+
+        function drawCoil(innerW, innerH, coilLen, pitch, layers) {
+            coilGroup.clear();
+
+            let maxW = innerW, maxH = innerH;
+
+            // Draw blue plastic bobbin/former
+            const bobbinW = innerW / 1000;
+            const bobbinH = innerH / 1000;
+            const bobbinD = coilLen / 1000;
+            const wallThickness = 0.001; // 1mm walls
+
+            // Create hollow box using BoxGeometry for walls
+            const bobbinMaterial = new THREE.MeshStandardMaterial({
+                color: 0x2196F3,
+                transparent: true,
+                opacity: 0.7,
+                side: THREE.DoubleSide
+            });
+
+            // Bottom wall
+            const bottomWall = new THREE.Mesh(
+                new THREE.BoxGeometry(bobbinW, wallThickness, bobbinD),
+                bobbinMaterial
+            );
+            bottomWall.position.y = -bobbinH / 2;
+            coilGroup.add(bottomWall);
+
+            // Top wall
+            const topWall = new THREE.Mesh(
+                new THREE.BoxGeometry(bobbinW, wallThickness, bobbinD),
+                bobbinMaterial
+            );
+            topWall.position.y = bobbinH / 2;
+            coilGroup.add(topWall);
+
+            // Left wall
+            const leftWall = new THREE.Mesh(
+                new THREE.BoxGeometry(wallThickness, bobbinH, bobbinD),
+                bobbinMaterial
+            );
+            leftWall.position.x = -bobbinW / 2;
+            coilGroup.add(leftWall);
+
+            // Right wall
+            const rightWall = new THREE.Mesh(
+                new THREE.BoxGeometry(wallThickness, bobbinH, bobbinD),
+                bobbinMaterial
+            );
+            rightWall.position.x = bobbinW / 2;
+            coilGroup.add(rightWall);
+
+            // Front flange
+            const frontFlange = new THREE.Mesh(
+                new THREE.BoxGeometry(bobbinW + 0.004, bobbinH + 0.004, wallThickness),
+                bobbinMaterial
+            );
+            frontFlange.position.z = bobbinD / 2;
+            coilGroup.add(frontFlange);
+
+            // Back flange
+            const backFlange = new THREE.Mesh(
+                new THREE.BoxGeometry(bobbinW + 0.004, bobbinH + 0.004, wallThickness),
+                bobbinMaterial
+            );
+            backFlange.position.z = -bobbinD / 2;
+            coilGroup.add(backFlange);
+
+            // Draw copper wire layers
+            for (let l = 0; l < layers; l++) {
+                const w = (innerW + 2 * pitch * (l + 0.5)) / 1000;
+                const h = (innerH + 2 * pitch * (l + 0.5)) / 1000;
+                const depth = coilLen / 1000;
+
+                maxW = Math.max(maxW, w * 1000);
+                maxH = Math.max(maxH, h * 1000);
+
+                const g = new THREE.BoxGeometry(w, h, depth);
+                const m = new THREE.MeshStandardMaterial({
+                    color: l % 2 ? 0xd48f3a : 0xc86b00,
+                    transparent: true,
+                    opacity: 0.5,
+                    side: THREE.DoubleSide
+                });
+                const mesh = new THREE.Mesh(g, m);
+                coilGroup.add(mesh);
+            }
+
+            drawDimensions(maxW, maxH, coilLen);
+        }
+
+        function update() {
+            const awg = parseInt(document.getElementById("awg").value);
+            const turns = parseInt(document.getElementById("turns").value);
+            const outerW = parseFloat(document.getElementById("outerW").value);
+            const outerH = parseFloat(document.getElementById("outerH").value);
+            const coilLen = parseFloat(document.getElementById("coilLen").value);
+
+            const result = computeFromOuter(outerW, outerH, coilLen, awg, turns);
+            const { innerW, innerH, tpl, layers, L, dcr, wireLen, pitch, error } = result;
+
+            if (error) {
+                document.getElementById("results").innerHTML = `
+                    <strong style="color: #ff5555;">Error:</strong><br>
+                    ${error}<br><br>
+                    <span style="font-size: 11px;">Try: reducing turns, using thinner wire (higher AWG), or increasing outer dimensions</span>
+                `;
+                return;
+            }
+
+            drawCoil(innerW, innerH, coilLen, pitch, layers);
+
+            document.getElementById("results").innerHTML = `
+                <strong>Calculated:</strong><br>
+                Inner: ${innerW.toFixed(1)} × ${innerH.toFixed(1)} mm<br>
+                Outer: ${outerW.toFixed(1)} × ${outerH.toFixed(1)} mm<br>
+                Turns/layer: ${tpl}<br>
+                Layers: ${layers}<br>
+                <br>
+                <strong>Performance:</strong><br>
+                L ≈ ${(L * 1000).toFixed(3)} mH<br>
+                DCR ≈ ${dcr.toFixed(3)} Ω<br>
+                Wire ≈ ${wireLen.toFixed(2)} m
+            `;
+        }
+
+        // Event listeners
+        document.getElementById("awg").addEventListener("input", update);
+        document.getElementById("turns").addEventListener("input", update);
+        document.getElementById("outerW").addEventListener("input", update);
+        document.getElementById("outerH").addEventListener("input", update);
+        document.getElementById("coilLen").addEventListener("input", update);
+
+        document.getElementById("calcBtn").onclick = () => {
+            const Ltarget = parseFloat(document.getElementById("targetL").value) / 1000;
+            const outerW = parseFloat(document.getElementById("outerW").value);
+            const outerH = parseFloat(document.getElementById("outerH").value);
+            const coilLen = parseFloat(document.getElementById("coilLen").value);
+            const awg = parseInt(document.getElementById("awg").value);
+
+            // Estimate inner dimensions (assume some reasonable layer thickness)
+            const d = AWG[awg].dia * 1.1;
+            const estimatedLayers = 5; // initial guess
+            const estInnerW = outerW - 2 * d * estimatedLayers;
+            const estInnerH = outerH - 2 * d * estimatedLayers;
+
+            const A = (estInnerW / 1000) * (estInnerH / 1000);
+            const N = Math.sqrt(Ltarget * (coilLen / 1000) / (MU0 * A));
+            document.getElementById("turns").value = Math.round(N);
+            update();
+        };
+
+        // View controls
+        document.getElementById("viewFront").onclick = () => {
+            camera.position.set(0, 0, 0.3);
+            camera.lookAt(0, 0, 0);
+        };
+
+        document.getElementById("viewTop").onclick = () => {
+            camera.position.set(0, 0.3, 0);
+            camera.lookAt(0, 0, 0);
+        };
+
+        document.getElementById("viewSide").onclick = () => {
+            camera.position.set(0.3, 0, 0);
+            camera.lookAt(0, 0, 0);
+        };
+
+        document.getElementById("viewIso").onclick = () => {
+            camera.position.set(0.15, 0.1, 0.3);
+            camera.lookAt(0, 0, 0);
+        };
+
+        document.getElementById("toggleDims").onclick = (e) => {
+            showDimensions = !showDimensions;
+            e.target.textContent = `Dims: ${showDimensions ? 'ON' : 'OFF'}`;
+            update();
+        };
+
+        document.getElementById("resetView").onclick = () => {
+            camera.position.set(0.15, 0.1, 0.3);
+            camera.lookAt(0, 0, 0);
+            controls.target.set(0, 0, 0);
+        };
+
+        update();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+
+</html>
